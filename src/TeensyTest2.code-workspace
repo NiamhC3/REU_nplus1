@@ -1,0 +1,22 @@
+{
+	"folders": [
+		{
+			"name": "TeensyTest",
+			"path": "../../TeensyTest"
+		},
+		{
+			"name": "Load Cell",
+			"path": "../../Load Cell"
+		},
+		{
+			"name": "REU_nplus1",
+			"path": ".."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.tpp": "cpp",
+			"cmath": "cpp"
+		}
+	}
+}
