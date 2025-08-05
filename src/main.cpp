@@ -372,6 +372,17 @@ float currentPosition(ODriveUserData &user_data, bool serialFeedback) {
   return feedback.Pos_Estimate;
 }
 
+float currentVelocity(ODriveUserData &user_data, bool serialFeedback) {
+  pumpEvents(can_intf);
+  Get_Encoder_Estimates_msg_t feedback = user_data.last_feedback;
+  user_data.received_feedback = false;
+   if (serialFeedback){
+    Serial.print("Current position: ");
+    Serial.println(feedback.Vel_Estimate, 6);
+  }
+  return feedback.Vel_Estimate;
+}
+
 // Adds a delay until new feedback is recieved. This is used before refreshing positions to ensure the most recent position is updated
 // Needs to be optimized! Takes too long, is restricting frequency of updates
 void waitForNewFeedback(ODriveUserData &user_data, int userDelay) {
@@ -381,6 +392,7 @@ void waitForNewFeedback(ODriveUserData &user_data, int userDelay) {
     pumpEvents(can_intf);
     delay(1);
   }
+
 }
 
 // Calculates joint torques due to gravity, and returns the equivalent motor torques. (Subtract these values to counteract gravitation torque)
@@ -404,7 +416,7 @@ void gravityFeedforward(float motorPositions[4], float motorOffsets[4], float fo
   COMCoords[3][0] = 16.674 * sin(2.6218 * jointAngles[1] + jointAngles[2]) + topOfSegment[2][0];
   COMCoords[3][1] = 16.674 * cos(2.6218 * jointAngles[1] + jointAngles[2]) + topOfSegment[2][1];
 
-  forwardJointTorques[0] = sin(jointAngles[0] - 0.261799) * 9.81/1000 * 
+  forwardJointTorques[0] = -0.00225 + sin(jointAngles[0] - 0.3) * 4.25/1000 * 
                           (COMCoords[0][1] * segmentMasses[0] +
                           COMCoords[1][1] * segmentMasses[1] + 
                           COMCoords[2][1] * segmentMasses[2] +
@@ -412,7 +424,7 @@ void gravityFeedforward(float motorPositions[4], float motorOffsets[4], float fo
 
   forwardJointTorques[1] = 9.81/1000 * (COMCoords[1][0] * segmentMasses[1] + 
                                         COMCoords[2][0] * segmentMasses[2] + 
-                                        COMCoords[3][0] * segmentMasses[3]);  
+                                        COMCoords[3][0] * segmentMasses[3])/(1.075) + (0.058 * jointAngles[0]);  
   
   forwardJointTorques[2] = 16.674 * sin(2.6218 * jointAngles[1] + jointAngles[2]) * segmentMasses[2] * 9.81/1000;
 
@@ -429,7 +441,7 @@ void positionOffsets(float motorOffsets[4], bool feedback){
   delay(250);
   odrv0.setTorque(-0.0075); // Negative Applies Torque
   odrv1.setTorque(-0.022); // Negative Applies Torque
-  odrv2.setTorque(0.022); // Positive Applies Torque
+  odrv2.setTorque(0.025); // Positive Applies Torque
   odrv3.setTorque(0.015); // Positive Applies Torque
   Serial.println("Getting netural positions...");
   delay(2000);
@@ -458,8 +470,6 @@ void setup() {
     delay(200);
   }
 
-
-  Serial.println("Starting ODriveCAN demo");
 
 
   odrv0.onFeedback(onFeedback, &odrv0_user_data);
@@ -601,8 +611,12 @@ void loop() {
   float gravityMotorTorques[4] = {0,0,0,0};
   float actualMotorPositions[4] = {0,0,0,0};
   float gravityJointTorques[3] = {0,0,0};
-  int i = 0;
+  float actualMotorVelocities[4] = {0,0,0,0};
+  int relativePosition[4] = {0,0,0,0};
+
+  int i = 0, j = 0;
   motorPositionCalculation(tempJointAngles, tempMotorPositions, tempMotorOffsets, 0);
+
   Serial.println("Desired motor positions");
   Serial.println(tempMotorPositions[0],6);
   Serial.println(tempMotorPositions[1],6);
@@ -611,17 +625,24 @@ void loop() {
   while(1){
     i += 1;
     // Check current motor positions
-    waitForNewFeedback(odrv0_user_data, 10);
-    waitForNewFeedback(odrv1_user_data, 10);
-    waitForNewFeedback(odrv2_user_data, 10);
-    waitForNewFeedback(odrv3_user_data, 10);
+    waitForNewFeedback(odrv0_user_data, 5);
+    waitForNewFeedback(odrv1_user_data, 5);
+    waitForNewFeedback(odrv2_user_data, 5);
+    waitForNewFeedback(odrv3_user_data, 5);
     actualMotorPositions[0] = currentPosition(odrv0_user_data, serialFeedback[2]);
     actualMotorPositions[1] = currentPosition(odrv1_user_data, serialFeedback[2]);
     actualMotorPositions[2] = currentPosition(odrv2_user_data, serialFeedback[2]);
     actualMotorPositions[3] = currentPosition(odrv3_user_data, serialFeedback[2]);
 
+    actualMotorVelocities[0] = currentVelocity(odrv0_user_data,0);
+    actualMotorVelocities[1] = currentVelocity(odrv1_user_data,0);
+    actualMotorVelocities[2] = currentVelocity(odrv2_user_data,0);
+    actualMotorVelocities[3] = currentVelocity(odrv3_user_data,0);
+
+
     // Calculate gravity feedforward
     gravityFeedforward(actualMotorPositions, tempMotorOffsets, forwardJointTorques);
+   
 
     // Joint torques required to oppose gravity
     gravityJointTorques[0] =  - forwardJointTorques[0];
@@ -630,12 +651,46 @@ void loop() {
     
 
     motorTorqueCalculation(gravityJointTorques, gravityMotorTorques, minTorque, 0);
-  
-    tempMotorTorques[0] = gravityMotorTorques[0] - (tempMotorPositions[0] - actualMotorPositions[0]) * 0.025;
-    tempMotorTorques[1] = gravityMotorTorques[1] - (tempMotorPositions[1] - actualMotorPositions[1]) * 0.025;
-    tempMotorTorques[2] = gravityMotorTorques[2] + (tempMotorPositions[2] - actualMotorPositions[2]) * 0.025;
-    tempMotorTorques[3] = gravityMotorTorques[3] + (tempMotorPositions[3] - actualMotorPositions[3]) * 0.025;
+    
+    /*tempMotorTorques[0] = gravityMotorTorques[0];
+    tempMotorTorques[1] = gravityMotorTorques[1];
+    tempMotorTorques[2] = gravityMotorTorques[2];
+    tempMotorTorques[3] = gravityMotorTorques[3];*/
 
+    for (j = 0; j < 4; j++ ){
+      if (tempMotorPositions[j] > actualMotorPositions[i]){
+        relativePosition[j] = 1;
+      }
+      else {
+        relativePosition[j] = 1;
+      }
+    }
+
+    tempMotorTorques[0] = gravityMotorTorques[0] 
+                        - (tempMotorPositions[0] - actualMotorPositions[0]) * 0.02
+                            + actualMotorVelocities[0] * 0;
+
+    tempMotorTorques[1] = gravityMotorTorques[1]
+                        - (tempMotorPositions[1] - actualMotorPositions[1]) * 0.02
+                            + actualMotorVelocities[1] * 0;
+
+    tempMotorTorques[2] = gravityMotorTorques[2]
+                        + (tempMotorPositions[2] - actualMotorPositions[2]) * 0.03
+                           + actualMotorVelocities[2] * 0;
+
+    tempMotorTorques[3] = gravityMotorTorques[3]
+                        + (tempMotorPositions[3] - actualMotorPositions[3]) * 0.02
+                           + actualMotorVelocities[3] * 0;
+
+
+    if (i == 75){
+      Serial.println("Torques pre-balancing: ");
+      Serial.println(tempMotorTorques[0],6);
+      Serial.println(tempMotorTorques[1],6);
+      Serial.println(tempMotorTorques[2],6);
+      Serial.println(tempMotorTorques[3],6);
+     }
+     
     torqueBalancingCalculation(tempMotorTorques, minTorque);
 
     
@@ -645,16 +700,17 @@ void loop() {
     odrv3.setTorque(tempMotorTorques[3]); // Positive Applies Torque
 
     // Debugging print statements
-    if (i == 50){
+    if (i == 75){
       Serial.println("Motor positions");
       Serial.println(actualMotorPositions[0],6);
       Serial.println(actualMotorPositions[1],6);
       Serial.println(actualMotorPositions[2],6);
       Serial.println(actualMotorPositions[3],6);
-      Serial.println("Joint feedforward: ");
-      Serial.println(forwardJointTorques[0],6);
-      Serial.println(forwardJointTorques[1],6);
-      Serial.println(forwardJointTorques[2],6);
+      Serial.println("Torques due to derivative gain");
+      Serial.println((actualMotorVelocities[0]* -0.0005),6);
+      Serial.println((actualMotorVelocities[1]* -0.0005),6);
+      Serial.println((actualMotorVelocities[2]* 0.0005),6);
+      Serial.println((actualMotorVelocities[3]* 0.0005),6);
       Serial.println("Torque due to proportional gain");
       Serial.println(((actualMotorPositions[0] - tempMotorPositions[0]) * -0.015),6);
       Serial.println(((actualMotorPositions[1] - tempMotorPositions[1]) * -0.015),6);
@@ -668,10 +724,5 @@ void loop() {
       i = 0;
     }
     delay(5);
-    // Apply new motor torques (ONLY apply torques passed through torqueBalancingCalculation or motorTorqueCalculations to avoid dangerous torques)
-  }
-
-  while(1){
-    delay(1000);
   }
 }
