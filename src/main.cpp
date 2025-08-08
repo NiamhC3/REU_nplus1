@@ -430,6 +430,33 @@ void gravityFeedforward(float motorPositions[4], float motorOffsets[4], float fo
 
 }
 
+
+void readSerialInput(float tempJointAngles[3]) {
+  static String inputString = "";
+  
+  while (Serial.available()) {
+    char inChar = (char)Serial.read();
+
+    if (inChar == '\n') {
+      // Full message received, parse it
+      float splay, proximal, distal;
+      int numParsed = sscanf(inputString.c_str(), "%f,%f,%f", &splay, &proximal, &distal);
+
+      if (numParsed == 3) {
+        tempJointAngles[0] = splay;
+        tempJointAngles[1] = proximal;
+        tempJointAngles[2] = distal;
+      } else {
+
+      }
+
+      inputString = "";  // Clear for next input
+    } else {
+      inputString += inChar;
+    }
+  }
+}
+
 // ------------------Odrive Calibration and Setup-----------------------------------------
 // Run in main after setup. Moves motor to fully upright clockwise position, and records offsets
 void positionOffsets(float motorOffsets[4], bool feedback){
@@ -586,46 +613,57 @@ void setup() {
 
 void loop() {
   Serial.println("In main");
-  pumpEvents(can_intf);
-  // Initializing variables to store various motor values. All values are for motors {0, 1, 2, 3}
+  // Initializing variables to store various motor values. All values are for motors {0, 1, 2, 3}, or joints {splay, proximal, distal}
   float tempMotorTorques[4] ={0,0,0,0}; // Stores calculated motor torques
   float tempMotorPositions[4] = {0,0,0,0}; // Stores the motor positions to get desired angle positions
   float tempMotorOffsets[4] = {0,0,0,0}; // Stores recorded motor position offsets
   float tempMotorAngles[4] = {0,0,0,0}; // Stores calculated motor angles 
   float forwardJointTorques[3] = {0,0,0};
-
-  // User variables
-  float tempJointTorques[3] = {0,0,0}; // {<splay>, <proximal>, <distal>}
-  float tempJointAngles[3] = {0,0.6,0.6}; // {<splay>, <proximal>, <distal>}
-  float actualJointAngles[3] = {0,0,0};
-  float minTorque = 0.005; // Value the lowest motor torque is scaled to
-  // A value of 0 prints no feedback. A value of 1 prints feedback
-  bool serialFeedback[5] = {1,0,0,1};
-   // {<motorTorqueCalculation>, <motorPositionCalculation>, <currentPosition>, <positionOffsets>}
-
-  // Runs a calibration sequence to collect the motor offsets. Prints the offsets
-  positionOffsets(tempMotorOffsets, serialFeedback[3]);
-
-  // Calculates the motor torques required to get tempJointTorques. Scales to minTorques
-  motorTorqueCalculation(tempJointTorques, tempMotorTorques, minTorque, serialFeedback[0]); // calculates neutral torques
   float gravityMotorTorques[4] = {0,0,0,0};
   float actualMotorPositions[4] = {0,0,0,0};
   float gravityJointTorques[3] = {0,0,0};
   float actualMotorVelocities[4] = {0,0,0,0};
-
+  float tempJointTorques[3] = {0,0,0};
   int i = 0, j = 0;
+
+  // User variables
+  float tempJointAngles[3] = {0,0.6,0.6}; // {<splay>, <proximal>, <distal>}
+  float actualJointAngles[3] = {0,0,0};
+  float minTorque = 0.005; // Value the lowest motor torque is scaled to
+  bool serialFeedback[5] = {0,0,0,0};   // A value of 0 prints no feedback. A value of 1 prints feedback, {<motorTorqueCalculation>, <motorPositionCalculation>, <currentPosition>, <positionOffsets>}
+
+  // Runs a calibration sequence to collect the motor offsets
+  positionOffsets(tempMotorOffsets, serialFeedback[3]);
+
+  // Calculates the motor torques required to get tempJointTorques. Scales lowest to minTorques
+  motorTorqueCalculation(tempJointTorques, tempMotorTorques, minTorque, serialFeedback[0]);
+
+  // Calculates and prints the motor positions calculated from the inputted joint angles
   motorPositionCalculation(tempJointAngles, tempMotorPositions, tempMotorOffsets, 0);
-  /*tempMotorPositions[0] = 0.036;
-  tempMotorPositions[1] = -1.01;
-  tempMotorPositions[2] = 0.01;
-  tempMotorPositions[3] = -0.23;*/
-  Serial.println("Desired motor positions");
+  /*Serial.println("Desired motor positions");
   Serial.println(tempMotorPositions[0],6);
   Serial.println(tempMotorPositions[1],6);
   Serial.println(tempMotorPositions[2],6);
-  Serial.println(tempMotorPositions[3],6);
+  Serial.println(tempMotorPositions[3],6);*/
+  static unsigned long lastSend = 0; // For python
+
   while(1){
     i += 1;
+
+    if (millis() - lastSend > 100) {
+      lastSend = millis();
+      Serial.print("DATA,");
+      Serial.print(tempMotorTorques[0], 6);
+      Serial.print(",");
+      Serial.print(tempMotorTorques[1], 6);
+      Serial.print(",");
+      Serial.print(tempMotorTorques[2], 6);
+      Serial.print(",");
+      Serial.println(tempMotorTorques[3], 6);
+      Serial.flush();
+    }
+
+    readSerialInput(tempJointAngles);
     // Check current motor positions
     waitForNewFeedback(odrv0_user_data, 1);
     waitForNewFeedback(odrv1_user_data, 1);
@@ -641,26 +679,17 @@ void loop() {
     actualMotorVelocities[2] = currentVelocity(odrv2_user_data,0);
     actualMotorVelocities[3] = currentVelocity(odrv3_user_data,0);
 
-
     // Calculate gravity feedforward
     gravityFeedforward(actualMotorPositions, tempMotorOffsets, forwardJointTorques);
-   
-
+  
     // Joint torques required to oppose gravity
     gravityJointTorques[0] =  - forwardJointTorques[0];
     gravityJointTorques[1] =  - forwardJointTorques[1];
     gravityJointTorques[2] =  - forwardJointTorques[2];
     
-
     motorTorqueCalculation(gravityJointTorques, gravityMotorTorques, minTorque, 0);
-    
-    /*tempMotorTorques[0] = gravityMotorTorques[0];
-    tempMotorTorques[1] = gravityMotorTorques[1];
-    tempMotorTorques[2] = gravityMotorTorques[2];
-    tempMotorTorques[3] = gravityMotorTorques[3];*/
 
-
-    
+    // Feedforward, proportional, and derivative control
     tempMotorTorques[0] = gravityMotorTorques[0] 
                         - (tempMotorPositions[0] - actualMotorPositions[0]) * 0.02
                             + actualMotorVelocities[0] * 0.000225; //0.00337;
@@ -677,40 +706,18 @@ void loop() {
                         + (tempMotorPositions[3] - actualMotorPositions[3]) * 0.023
                            - actualMotorVelocities[3] * 0.000225; // 0.00347
 
-
-
-     
+    // Restrics torques to a safe range. (min torque to 0.025)
     torqueBalancingCalculation(tempMotorTorques, minTorque);
 
-    
+    // Applies torques to the motors
     odrv0.setTorque(-tempMotorTorques[0]);// Negative Applies Torque
     odrv1.setTorque(-tempMotorTorques[1]); // Negative Applies Torque
     odrv2.setTorque(tempMotorTorques[2]); // Positive Applies Torque
     odrv3.setTorque(tempMotorTorques[3]); // Positive Applies Torque
 
-    // Debugging print statements
+    // Prints the seconds elapsed every 1000 updates
     if (i == 1000){
-      Serial.println(millis()/1000);
-      /*Serial.println("Motor positions");
-      Serial.println(actualMotorPositions[0],6);
-      Serial.println(actualMotorPositions[1],6);
-      Serial.println(actualMotorPositions[2],6);
-      Serial.println(actualMotorPositions[3],6);
-      Serial.println("Torques due to derivative gain");
-      Serial.println((actualMotorVelocities[0]* -0.0005),6);
-      Serial.println((actualMotorVelocities[1]* -0.0005),6);
-      Serial.println((actualMotorVelocities[2]* 0.0005),6);
-      Serial.println((actualMotorVelocities[3]* 0.0005),6);
-      Serial.println("Torque due to proportional gain");
-      Serial.println(((actualMotorPositions[0] - tempMotorPositions[0]) * -0.015),6);
-      Serial.println(((actualMotorPositions[1] - tempMotorPositions[1]) * -0.015),6);
-      Serial.println(((actualMotorPositions[2] - tempMotorPositions[2]) * 0.015),6);
-      Serial.println(((actualMotorPositions[3] - tempMotorPositions[3]) * 0.015),6);
-      Serial.println("Current motor torques: ");
-      Serial.println(tempMotorTorques[0],6);
-      Serial.println(tempMotorTorques[1],6);
-      Serial.println(tempMotorTorques[2],6);
-      Serial.println(tempMotorTorques[3],6);*/
+      //Serial.println(millis()/1000);
       i = 0;
     }
 
