@@ -9,6 +9,7 @@ class LivePlotApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Motor Torques over Time")
+        self.root.geometry("1200x800")
 
         # Serial setup
         try:
@@ -20,10 +21,10 @@ class LivePlotApp:
             self.ser = None
 
         # Set up plot
-        self.fig, self.ax = plt.subplots()
+        
+        self.fig, self.ax = plt.subplots(figsize=(10, 6))  # width, height
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
-        self.canvas.get_tk_widget().pack()
-
+        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         # Input fields
         self.input_frame = tk.Frame(self.root)
         self.input_frame.pack(pady=10)
@@ -84,16 +85,20 @@ class LivePlotApp:
             print("Invalid input.")
 
     def read_teensy_data(self):
-        if self.ser and self.ser.in_waiting:
-            try:
-                line = self.ser.readline().decode().strip()
-                if line.startswith("DATA"):
-                    values = list(map(float, line.strip().split(",")[1:]))
-                    if len(values) == 4:
-                        return values
-            except:
-                pass
+        if self.ser:
+            latest_data = None
+            while self.ser.in_waiting:
+                try:
+                    line = self.ser.readline().decode(errors='ignore').strip()
+                    if line.startswith("DATA"):
+                        values = list(map(float, line.split(",")[1:]))
+                        if len(values) == 4:
+                            latest_data = values  # keep updating latest valid data
+                except Exception:
+                    pass
+            return latest_data
         return None
+
 
     def update_plot(self):
         elapsed = time.time() - self.start_time
