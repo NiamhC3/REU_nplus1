@@ -617,7 +617,6 @@ void loop() {
   float tempMotorTorques[4] ={0,0,0,0}; // Stores calculated motor torques
   float tempMotorPositions[4] = {0,0,0,0}; // Stores the motor positions to get desired angle positions
   float tempMotorOffsets[4] = {0,0,0,0}; // Stores recorded motor position offsets
-  float tempMotorAngles[4] = {0,0,0,0}; // Stores calculated motor angles 
   float forwardJointTorques[3] = {0,0,0};
   float gravityMotorTorques[4] = {0,0,0,0};
   float actualMotorPositions[4] = {0,0,0,0};
@@ -628,7 +627,6 @@ void loop() {
 
   // User variables
   float tempJointAngles[3] = {0,0.6,0.6}; // {<splay>, <proximal>, <distal>}
-  float actualJointAngles[3] = {0,0,0};
   float minTorque = 0.005; // Value the lowest motor torque is scaled to
   bool serialFeedback[5] = {0,0,0,0};   // A value of 0 prints no feedback. A value of 1 prints feedback, {<motorTorqueCalculation>, <motorPositionCalculation>, <currentPosition>, <positionOffsets>}
 
@@ -646,7 +644,8 @@ void loop() {
   Serial.println(tempMotorPositions[2],6);
   Serial.println(tempMotorPositions[3],6);*/
   static unsigned long lastSend = 0; // For python
-
+  float integralSums[4] = {0,0,0,0};
+  float integralCap = 0.005;
   while(1){
     i += 1;
 
@@ -688,6 +687,23 @@ void loop() {
     gravityJointTorques[2] =  - forwardJointTorques[2];
     
     motorTorqueCalculation(gravityJointTorques, gravityMotorTorques, minTorque, 0);
+    
+    // Integral Term Calculations
+    integralSums[0] -= (tempMotorPositions[0] - actualMotorPositions[0]) * 0.005;
+    integralSums[1] -= (tempMotorPositions[1] - actualMotorPositions[1]) * 0.005;
+    integralSums[2] += (tempMotorPositions[2] - actualMotorPositions[2]) * 0.005;
+    integralSums[3] += (tempMotorPositions[3] - actualMotorPositions[3]) * 0.005;
+
+    // Integral cap to prevent windup
+    for (j = 0; j < 4; j ++){
+      if (integralSums[i] > integralCap){
+        integralSums[i] = integralCap;
+      }
+      else if (integralSums[i] < -integralCap){
+        integralSums[i] = -integralCap;
+      }
+    }
+
 
     // Feedforward, proportional, and derivative control
     tempMotorTorques[0] = gravityMotorTorques[0] 
@@ -705,6 +721,7 @@ void loop() {
     tempMotorTorques[3] = gravityMotorTorques[3]
                         + (tempMotorPositions[3] - actualMotorPositions[3]) * 0.023
                            - actualMotorVelocities[3] * 0.000225; // 0.00347
+
 
     // Restrics torques to a safe range. (min torque to 0.025)
     torqueBalancingCalculation(tempMotorTorques, minTorque);
