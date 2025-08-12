@@ -4,7 +4,7 @@
 //  Defines the bitrate and node IDs of each odrive.
 #define CAN_BAUDRATE 250000
 #define ODRV0_NODE_ID 0
-#define ODRV1_NODE_ID 1
+#define ODRV1_NODE_ID 5
 #define ODRV2_NODE_ID 2
 #define ODRV3_NODE_ID 3
 
@@ -628,7 +628,7 @@ void loop() {
   // User variables
   float tempJointAngles[3] = {0,0.6,0.6}; // {<splay>, <proximal>, <distal>}
   float minTorque = 0.005; // Value the lowest motor torque is scaled to
-  bool serialFeedback[5] = {0,0,0,0};   // A value of 0 prints no feedback. A value of 1 prints feedback, {<motorTorqueCalculation>, <motorPositionCalculation>, <currentPosition>, <positionOffsets>}
+  bool serialFeedback[5] = {0,0,0,1};   // A value of 0 prints no feedback. A value of 1 prints feedback, {<motorTorqueCalculation>, <motorPositionCalculation>, <currentPosition>, <positionOffsets>}
 
   // Runs a calibration sequence to collect the motor offsets
   positionOffsets(tempMotorOffsets, serialFeedback[3]);
@@ -638,16 +638,27 @@ void loop() {
 
   // Calculates and prints the motor positions calculated from the inputted joint angles
   motorPositionCalculation(tempJointAngles, tempMotorPositions, tempMotorOffsets, 0);
-  /*Serial.println("Desired motor positions");
+  Serial.println("Desired motor positions");
   Serial.println(tempMotorPositions[0],6);
   Serial.println(tempMotorPositions[1],6);
   Serial.println(tempMotorPositions[2],6);
-  Serial.println(tempMotorPositions[3],6);*/
+  Serial.println(tempMotorPositions[3],6);
   static unsigned long lastSend = 0; // For python
   float integralSums[4] = {0,0,0,0};
-  float integralCap = 0.005;
+  float integralCap = 0.003;
   while(1){
     i += 1;
+
+
+    // Check current motor positions
+    waitForNewFeedback(odrv0_user_data, 1);
+    waitForNewFeedback(odrv1_user_data, 1);
+    waitForNewFeedback(odrv2_user_data, 1);
+    waitForNewFeedback(odrv3_user_data, 1);
+    actualMotorPositions[0] = currentPosition(odrv0_user_data, serialFeedback[2]);
+    actualMotorPositions[1] = currentPosition(odrv1_user_data, serialFeedback[2]);
+    actualMotorPositions[2] = currentPosition(odrv2_user_data, serialFeedback[2]);
+    actualMotorPositions[3] = currentPosition(odrv3_user_data, serialFeedback[2]);
 
     if (millis() - lastSend > 100) {
       lastSend = millis();
@@ -662,16 +673,7 @@ void loop() {
       Serial.flush();
     }
 
-    readSerialInput(tempJointAngles);
-    // Check current motor positions
-    waitForNewFeedback(odrv0_user_data, 1);
-    waitForNewFeedback(odrv1_user_data, 1);
-    waitForNewFeedback(odrv2_user_data, 1);
-    waitForNewFeedback(odrv3_user_data, 1);
-    actualMotorPositions[0] = currentPosition(odrv0_user_data, serialFeedback[2]);
-    actualMotorPositions[1] = currentPosition(odrv1_user_data, serialFeedback[2]);
-    actualMotorPositions[2] = currentPosition(odrv2_user_data, serialFeedback[2]);
-    actualMotorPositions[3] = currentPosition(odrv3_user_data, serialFeedback[2]);
+    //readSerialInput(tempJointAngles);
 
     actualMotorVelocities[0] = currentVelocity(odrv0_user_data,0);
     actualMotorVelocities[1] = currentVelocity(odrv1_user_data,0);
@@ -689,38 +691,47 @@ void loop() {
     motorTorqueCalculation(gravityJointTorques, gravityMotorTorques, minTorque, 0);
     
     // Integral Term Calculations
-    integralSums[0] -= (tempMotorPositions[0] - actualMotorPositions[0]) * 0.005;
-    integralSums[1] -= (tempMotorPositions[1] - actualMotorPositions[1]) * 0.005;
-    integralSums[2] += (tempMotorPositions[2] - actualMotorPositions[2]) * 0.005;
-    integralSums[3] += (tempMotorPositions[3] - actualMotorPositions[3]) * 0.005;
+    integralSums[0] -= (tempMotorPositions[0] - actualMotorPositions[0]) * 0.00075;
+    integralSums[1] -= (tempMotorPositions[1] - actualMotorPositions[1]) * 0.00075;
+    integralSums[2] += (tempMotorPositions[2] - actualMotorPositions[2]) * 0.00075;
+    integralSums[3] += (tempMotorPositions[3] - actualMotorPositions[3]) * 0.00075;
 
     // Integral cap to prevent windup
     for (j = 0; j < 4; j ++){
-      if (integralSums[i] > integralCap){
-        integralSums[i] = integralCap;
+      if (integralSums[j] > integralCap){
+        integralSums[j] = integralCap;
       }
-      else if (integralSums[i] < -integralCap){
-        integralSums[i] = -integralCap;
+      else if (integralSums[j] < -integralCap){
+        integralSums[j] = -integralCap;
       }
     }
+    /*tempMotorTorques[0] = gravityMotorTorques[0];
+    tempMotorTorques[1] = gravityMotorTorques[1]; 
+    tempMotorTorques[2] = gravityMotorTorques[2]; 
+    tempMotorTorques[3] = gravityMotorTorques[3]; */
 
 
+    
     // Feedforward, proportional, and derivative control
     tempMotorTorques[0] = gravityMotorTorques[0] 
                         - (tempMotorPositions[0] - actualMotorPositions[0]) * 0.02
-                            + actualMotorVelocities[0] * 0.000225; //0.00337;
+                            + actualMotorVelocities[0] * 0.00025
+                            + integralSums[0]; //0.00337;
 
     tempMotorTorques[1] = gravityMotorTorques[1]
                         - (tempMotorPositions[1] - actualMotorPositions[1]) * 0.02
-                            + actualMotorVelocities[1] * 0.000225; // 0.00337;
+                            + actualMotorVelocities[1] * 0.00025
+                            + integralSums[1]; // 0.00337;
 
     tempMotorTorques[2] = gravityMotorTorques[2]
                         + (tempMotorPositions[2] - actualMotorPositions[2]) * 0.023
-                           - actualMotorVelocities[2] * 0.000225; //0.00357;
+                           - actualMotorVelocities[2] * 0.00025
+                           + integralSums[2]; //0.00357;
 
     tempMotorTorques[3] = gravityMotorTorques[3]
                         + (tempMotorPositions[3] - actualMotorPositions[3]) * 0.023
-                           - actualMotorVelocities[3] * 0.000225; // 0.00347
+                           - actualMotorVelocities[3] * 0.00025
+                           + integralSums[3]; // 0.00347
 
 
     // Restrics torques to a safe range. (min torque to 0.025)
@@ -737,7 +748,6 @@ void loop() {
       //Serial.println(millis()/1000);
       i = 0;
     }
-
-    delay(1);
+    delayMicroseconds(50);
   }
 }

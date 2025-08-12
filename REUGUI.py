@@ -13,7 +13,7 @@ class LivePlotApp:
 
         # Serial setup
         try:
-            self.ser = serial.Serial('COM8', 115200, timeout=1)
+            self.ser = serial.Serial('COM13', 115200, timeout=1)
             time.sleep(2)
             print("Serial connection established.")
         except Exception as e:
