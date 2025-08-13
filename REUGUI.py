@@ -3,13 +3,12 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 import serial
 import time
-import threading
 
 class LivePlotApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Motor Torques over Time")
-        self.root.geometry("1200x800")
+        self.root.title("Motor Torques and Position Data over Time")
+        self.root.geometry("1200x900")
 
         # Serial setup
         try:
@@ -20,11 +19,11 @@ class LivePlotApp:
             print(f"Serial connection failed: {e}")
             self.ser = None
 
-        # Set up plot
-        
-        self.fig, self.ax = plt.subplots(figsize=(10, 6))  # width, height
+        # Create figure with 2 subplots
+        self.fig, (self.ax1, self.ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.root)
         self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
         # Input fields
         self.input_frame = tk.Frame(self.root)
         self.input_frame.pack(pady=10)
@@ -36,12 +35,12 @@ class LivePlotApp:
 
         tk.Label(self.input_frame, text="Proximal Angle:").grid(row=0, column=2)
         self.proximal_entry = tk.Entry(self.input_frame, width=10)
-        self.proximal_entry.insert(0, "0.0")
+        self.proximal_entry.insert(0, "0.6")
         self.proximal_entry.grid(row=0, column=3)
 
         tk.Label(self.input_frame, text="Distal Angle:").grid(row=0, column=4)
         self.distal_entry = tk.Entry(self.input_frame, width=10)
-        self.distal_entry.insert(0, "0.0")
+        self.distal_entry.insert(0, "0.6")
         self.distal_entry.grid(row=0, column=5)
 
         self.set_button = tk.Button(self.input_frame, text="Apply", command=self.apply_inputs)
@@ -55,18 +54,31 @@ class LivePlotApp:
         # Data tracking
         self.start_time = time.time()
         self.x_data = []
-        self.y_data = [[], [], [], []]  # 4 channels
+        self.y_data = [[] for _ in range(12)]  # 12 channels total
 
-        self.lines = []
-        colors = ['red', 'orange', 'green', 'blue']
-        labels = ['Motor 0', 'Motor 1', 'Motor 2', 'Motor 3']
+        # Motor torque lines (subplot 1)
+        torque_colors = ['red', 'orange', 'green', 'blue']
+        torque_labels = ['Motor 0', 'Motor 1', 'Motor 2', 'Motor 3']
+        self.lines1 = []
         for i in range(4):
-            line, = self.ax.plot([], [], color=colors[i], label=labels[i])
-            self.lines.append(line)
+            line, = self.ax1.plot([], [], color=torque_colors[i], label=torque_labels[i])
+            self.lines1.append(line)
 
-        self.ax.set_ylabel("Motor Torques (Nm)")
-        self.ax.set_xlabel("Time (s)")
-        self.ax.legend(loc="upper left")
+        self.ax1.set_ylabel("Motor Torques (Nm)")
+        self.ax1.legend(loc="upper left")
+
+        # Extra data lines (subplot 2)
+        extra_colors = ['red', 'orange', 'green', 'blue', 'red', 'orange', 'green', 'blue']
+        extra_labels = [f"Extra {i}" for i in range(8)]
+        self.lines2 = []
+        for i in range(8):
+            style = '-' if i < 4 else ':'  # last 4 dotted
+            line, = self.ax2.plot([], [], color=extra_colors[i], linestyle=style, label=extra_labels[i])
+            self.lines2.append(line)
+
+        self.ax2.set_ylabel("Position")
+        self.ax2.set_xlabel("Time (s)")
+        self.ax2.legend(loc="upper left")
 
         self.update_plot()
 
@@ -92,13 +104,12 @@ class LivePlotApp:
                     line = self.ser.readline().decode(errors='ignore').strip()
                     if line.startswith("DATA"):
                         values = list(map(float, line.split(",")[1:]))
-                        if len(values) == 4:
-                            latest_data = values  # keep updating latest valid data
+                        if len(values) == 12:
+                            latest_data = values
                 except Exception:
                     pass
             return latest_data
         return None
-
 
     def update_plot(self):
         elapsed = time.time() - self.start_time
@@ -106,7 +117,7 @@ class LivePlotApp:
         # Read from Teensy or fallback to zeros
         data = self.read_teensy_data()
         if not data:
-            data = [0.0, 0.0, 0.0, 0.0]
+            data = [0.0] * 12
 
         if len(self.x_data) >= 100:
             self.x_data.pop(0)
@@ -114,12 +125,21 @@ class LivePlotApp:
                 y.pop(0)
 
         self.x_data.append(elapsed)
-        for i in range(4):
+        for i in range(12):
             self.y_data[i].append(data[i])
-            self.lines[i].set_data(self.x_data, self.y_data[i])
 
-        self.ax.relim()
-        self.ax.autoscale_view()
+        # Update torque plot
+        for i in range(4):
+            self.lines1[i].set_data(self.x_data, self.y_data[i])
+
+        # Update extra data plot
+        for i in range(8):
+            self.lines2[i].set_data(self.x_data, self.y_data[i + 4])
+
+        self.ax1.relim()
+        self.ax1.autoscale_view()
+        self.ax2.relim()
+        self.ax2.autoscale_view()
         self.canvas.draw()
 
         self.root.after(100, self.update_plot)

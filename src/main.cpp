@@ -308,6 +308,9 @@ void torqueBalancingCalculation(float motorTorques[4], float minTorque){
 // This function uses linear approximation instead of actual relationship between coupled angles
 void  motorPositionCalculation(float jointAngles[3], float motorPositions[4], float motorOffsets[4], bool feedback){
   int i = 0, j = 0;
+  for (i = 0; i < 4; i++){
+    motorPositions[i] = 0;
+  }
   // Initializes motor angles to 0
   float motorAngles[4] = {0,0,0,0};
   float jointJacobian[4][3] = 
@@ -645,7 +648,7 @@ void loop() {
   Serial.println(tempMotorPositions[3],6);
   static unsigned long lastSend = 0; // For python
   float integralSums[4] = {0,0,0,0};
-  float integralCap = 0.003;
+  float integralCap = 0.006;
   while(1){
     i += 1;
 
@@ -660,6 +663,9 @@ void loop() {
     actualMotorPositions[2] = currentPosition(odrv2_user_data, serialFeedback[2]);
     actualMotorPositions[3] = currentPosition(odrv3_user_data, serialFeedback[2]);
 
+    readSerialInput(tempJointAngles);
+    motorPositionCalculation(tempJointAngles, tempMotorPositions, tempMotorOffsets, 0);
+
     if (millis() - lastSend > 100) {
       lastSend = millis();
       Serial.print("DATA,");
@@ -669,11 +675,27 @@ void loop() {
       Serial.print(",");
       Serial.print(tempMotorTorques[2], 6);
       Serial.print(",");
-      Serial.println(tempMotorTorques[3], 6);
-      Serial.flush();
+      Serial.print(tempMotorTorques[3], 6);
+      Serial.print(",");
+      Serial.print(actualMotorPositions[0], 6);
+      Serial.print(",");
+      Serial.print(actualMotorPositions[1], 6);
+      Serial.print(",");
+      Serial.print(actualMotorPositions[2], 6);
+      Serial.print(",");
+      Serial.print(actualMotorPositions[3], 6);
+      Serial.print(",");
+      Serial.print(tempMotorPositions[0], 6);
+      Serial.print(",");
+      Serial.print(tempMotorPositions[1], 6);
+      Serial.print(",");
+      Serial.print(tempMotorPositions[2], 6);
+      Serial.print(",");
+      Serial.println(tempMotorPositions[3], 6);
+
     }
 
-    //readSerialInput(tempJointAngles);
+
 
     actualMotorVelocities[0] = currentVelocity(odrv0_user_data,0);
     actualMotorVelocities[1] = currentVelocity(odrv1_user_data,0);
@@ -691,10 +713,10 @@ void loop() {
     motorTorqueCalculation(gravityJointTorques, gravityMotorTorques, minTorque, 0);
     
     // Integral Term Calculations
-    integralSums[0] -= (tempMotorPositions[0] - actualMotorPositions[0]) * 0.00075;
-    integralSums[1] -= (tempMotorPositions[1] - actualMotorPositions[1]) * 0.00075;
-    integralSums[2] += (tempMotorPositions[2] - actualMotorPositions[2]) * 0.00075;
-    integralSums[3] += (tempMotorPositions[3] - actualMotorPositions[3]) * 0.00075;
+    integralSums[0] -= (tempMotorPositions[0] - actualMotorPositions[0]) * 0.00175;
+    integralSums[1] -= (tempMotorPositions[1] - actualMotorPositions[1]) * 0.00175;
+    integralSums[2] += (tempMotorPositions[2] - actualMotorPositions[2]) * 0.00175;
+    integralSums[3] += (tempMotorPositions[3] - actualMotorPositions[3]) * 0.00175;
 
     // Integral cap to prevent windup
     for (j = 0; j < 4; j ++){
@@ -714,24 +736,24 @@ void loop() {
     
     // Feedforward, proportional, and derivative control
     tempMotorTorques[0] = gravityMotorTorques[0] 
-                        - (tempMotorPositions[0] - actualMotorPositions[0]) * 0.02
-                            + actualMotorVelocities[0] * 0.00025
-                            + integralSums[0]; //0.00337;
+                        - (tempMotorPositions[0] - actualMotorPositions[0]) * 0.022
+                            + actualMotorVelocities[0] * 0.00032
+                            + integralSums[0];
 
     tempMotorTorques[1] = gravityMotorTorques[1]
-                        - (tempMotorPositions[1] - actualMotorPositions[1]) * 0.02
-                            + actualMotorVelocities[1] * 0.00025
-                            + integralSums[1]; // 0.00337;
+                        - (tempMotorPositions[1] - actualMotorPositions[1]) * 0.022
+                            + actualMotorVelocities[1] * 0.00032
+                            + integralSums[1];
 
     tempMotorTorques[2] = gravityMotorTorques[2]
-                        + (tempMotorPositions[2] - actualMotorPositions[2]) * 0.023
-                           - actualMotorVelocities[2] * 0.00025
-                           + integralSums[2]; //0.00357;
+                        + (tempMotorPositions[2] - actualMotorPositions[2]) * 0.025
+                           - actualMotorVelocities[2] * 0.00035
+                           + integralSums[2];
 
     tempMotorTorques[3] = gravityMotorTorques[3]
-                        + (tempMotorPositions[3] - actualMotorPositions[3]) * 0.023
-                           - actualMotorVelocities[3] * 0.00025
-                           + integralSums[3]; // 0.00347
+                        + (tempMotorPositions[3] - actualMotorPositions[3]) * 0.025
+                           - actualMotorVelocities[3] * 0.000325
+                           + integralSums[3];
 
 
     // Restrics torques to a safe range. (min torque to 0.025)
@@ -748,6 +770,6 @@ void loop() {
       //Serial.println(millis()/1000);
       i = 0;
     }
-    delayMicroseconds(50);
+    delay(1);
   }
 }
