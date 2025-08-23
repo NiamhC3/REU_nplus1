@@ -69,7 +69,7 @@ class LivePlotApp:
 
         # Extra data lines (subplot 2)
         extra_colors = ['red', 'orange', 'green', 'blue', 'red', 'orange', 'green', 'blue']
-        extra_labels = [f"Extra {i}" for i in range(8)]
+        extra_labels = ['Motor 0', 'Motor 1', 'Motor 2', 'Motor 3','Desired Motor 0', 'Desired Motor 1', 'Desired Motor 2', 'Desired Motor 3']
         self.lines2 = []
         for i in range(8):
             style = '-' if i < 4 else ':'  # last 4 dotted

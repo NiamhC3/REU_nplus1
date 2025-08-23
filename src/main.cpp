@@ -323,7 +323,7 @@ void  motorPositionCalculation(float jointAngles[3], float motorPositions[4], fl
     for (j = 0; j < 3; j++){
       motorAngles[i] += jointJacobian[i][j] * jointAngles[j];
     }
-    motorAngles[i] = (motorAngles[i])/(7.5); // Confirm units
+    motorAngles[i] = (motorAngles[i])/(7.5);
   }
 
   float angleConversion[4] = {-1,-1,1,1}; // Only relevant if it isn't possible to have the Odrives read the position accurately.
@@ -375,6 +375,7 @@ float currentPosition(ODriveUserData &user_data, bool serialFeedback) {
   return feedback.Pos_Estimate;
 }
 
+// Prints the current velocity of the Odrive
 float currentVelocity(ODriveUserData &user_data, bool serialFeedback) {
   pumpEvents(can_intf);
   Get_Encoder_Estimates_msg_t feedback = user_data.last_feedback;
@@ -433,7 +434,7 @@ void gravityFeedforward(float motorPositions[4], float motorOffsets[4], float fo
 
 }
 
-
+// Collects the desired joint angles from the serial communication and parses them.
 void readSerialInput(float tempJointAngles[3]) {
   static String inputString = "";
   
@@ -463,18 +464,20 @@ void readSerialInput(float tempJointAngles[3]) {
 // ------------------Odrive Calibration and Setup-----------------------------------------
 // Run in main after setup. Moves motor to fully upright clockwise position, and records offsets
 void positionOffsets(float motorOffsets[4], bool feedback){
+  int i = 0;
   odrv0.setTorque(-0.014774); // Negative Applies Torque
   odrv1.setTorque(-0.01); // Negative Applies Torque
   odrv2.setTorque(0.02); // Positive Applies Torque
   odrv3.setTorque(0.01); // Positive Applies Torque
 
   delay(250);
+  Serial.println("Getting netural positions...");
+  for(i = 0; i < 10; i++){
   odrv0.setTorque(-0.0075); // Negative Applies Torque
   odrv1.setTorque(-0.023); // Negative Applies Torque
   odrv2.setTorque(0.025); // Positive Applies Torque
   odrv3.setTorque(0.0075); // Positive Applies Torque
-  Serial.println("Getting netural positions...");
-  delay(2000);
+  delay(100);}
 
   waitForNewFeedback(odrv0_user_data, 100);
   waitForNewFeedback(odrv1_user_data, 100);
@@ -629,9 +632,10 @@ void loop() {
   int i = 0, j = 0;
 
   // User variables
-  float tempJointAngles[3] = {0,0.6,0.6}; // {<splay>, <proximal>, <distal>}
+  float tempJointAngles[3] = {0,0,0}; // {<splay>, <proximal>, <distal>}
   float minTorque = 0.005; // Value the lowest motor torque is scaled to
   bool serialFeedback[5] = {0,0,0,1};   // A value of 0 prints no feedback. A value of 1 prints feedback, {<motorTorqueCalculation>, <motorPositionCalculation>, <currentPosition>, <positionOffsets>}
+  
 
   // Runs a calibration sequence to collect the motor offsets
   positionOffsets(tempMotorOffsets, serialFeedback[3]);
@@ -648,7 +652,7 @@ void loop() {
   Serial.println(tempMotorPositions[3],6);
   static unsigned long lastSend = 0; // For python
   float integralSums[4] = {0,0,0,0};
-  float integralCap = 0.006;
+  float integralCap = 0.00325;
   while(1){
     i += 1;
 
@@ -663,7 +667,7 @@ void loop() {
     actualMotorPositions[2] = currentPosition(odrv2_user_data, serialFeedback[2]);
     actualMotorPositions[3] = currentPosition(odrv3_user_data, serialFeedback[2]);
 
-    readSerialInput(tempJointAngles);
+    /*readSerialInput(tempJointAngles);
     motorPositionCalculation(tempJointAngles, tempMotorPositions, tempMotorOffsets, 0);
 
     if (millis() - lastSend > 100) {
@@ -693,7 +697,7 @@ void loop() {
       Serial.print(",");
       Serial.println(tempMotorPositions[3], 6);
 
-    }
+    }*/
 
 
 
@@ -713,9 +717,9 @@ void loop() {
     motorTorqueCalculation(gravityJointTorques, gravityMotorTorques, minTorque, 0);
     
     // Integral Term Calculations
-    integralSums[0] -= (tempMotorPositions[0] - actualMotorPositions[0]) * 0.00175;
-    integralSums[1] -= (tempMotorPositions[1] - actualMotorPositions[1]) * 0.00175;
-    integralSums[2] += (tempMotorPositions[2] - actualMotorPositions[2]) * 0.00175;
+    integralSums[0] -= (tempMotorPositions[0] - actualMotorPositions[0]) * 0.0015;
+    integralSums[1] -= (tempMotorPositions[1] - actualMotorPositions[1]) * 0.0015;
+    integralSums[2] += (tempMotorPositions[2] - actualMotorPositions[2]) * 0.0015;
     integralSums[3] += (tempMotorPositions[3] - actualMotorPositions[3]) * 0.00175;
 
     // Integral cap to prevent windup
@@ -734,25 +738,25 @@ void loop() {
 
 
     
-    // Feedforward, proportional, and derivative control
+    // Feedforward, proportional, derivative, and integral control
     tempMotorTorques[0] = gravityMotorTorques[0] 
-                        - (tempMotorPositions[0] - actualMotorPositions[0]) * 0.022
-                            + actualMotorVelocities[0] * 0.00032
+                        - ((tempMotorPositions[0] - actualMotorPositions[0]) * 0.018
+                            - actualMotorVelocities[0] * 0.00025)
                             + integralSums[0];
 
     tempMotorTorques[1] = gravityMotorTorques[1]
-                        - (tempMotorPositions[1] - actualMotorPositions[1]) * 0.022
-                            + actualMotorVelocities[1] * 0.00032
+                        - ((tempMotorPositions[1] - actualMotorPositions[1]) * 0.018
+                            - actualMotorVelocities[1] * 0.00025)
                             + integralSums[1];
 
     tempMotorTorques[2] = gravityMotorTorques[2]
-                        + (tempMotorPositions[2] - actualMotorPositions[2]) * 0.025
-                           - actualMotorVelocities[2] * 0.00035
+                        + ((tempMotorPositions[2] - actualMotorPositions[2]) * 0.038
+                           - actualMotorVelocities[2] * 0.00025)
                            + integralSums[2];
 
     tempMotorTorques[3] = gravityMotorTorques[3]
-                        + (tempMotorPositions[3] - actualMotorPositions[3]) * 0.025
-                           - actualMotorVelocities[3] * 0.000325
+                        + ((tempMotorPositions[3] - actualMotorPositions[3]) * 0.022
+                           - actualMotorVelocities[3] * 0.00025)
                            + integralSums[3];
 
 
@@ -766,8 +770,8 @@ void loop() {
     odrv3.setTorque(tempMotorTorques[3]); // Positive Applies Torque
 
     // Prints the seconds elapsed every 1000 updates
-    if (i == 1000){
-      //Serial.println(millis()/1000);
+    if (i == 5000){
+      Serial.println(millis()/1000);
       i = 0;
     }
     delay(1);
